@@ -264,6 +264,51 @@ def register_user_menu_handlers(bot, user_states, user_data):
         show_reviews(call.message, call.from_user.id, page=0)
     
     
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("write_review_"))
+    def write_review_from_order_callback(call):
+        """Оставить отзыв после покупки"""
+        bot.answer_callback_query(call.id, "⭐️ Оставить отзыв")
+        order_id = int(call.data.split("_")[-1])
+        
+        # Проверяем что заказ принадлежит пользователю
+        conn = sqlite3.connect(DATABASE)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, status FROM orders
+            WHERE id = ? AND user_id = ?
+        """, (order_id, call.from_user.id))
+        order = cursor.fetchone()
+        conn.close()
+        
+        if not order:
+            bot.answer_callback_query(call.id, "❌ Заказ не найден", show_alert=True)
+            return
+        
+        if order[1] != 'confirmed':
+            bot.answer_callback_query(call.id, "❌ Можно оставить отзыв только для подтверждённых заказов", show_alert=True)
+            return
+        
+        # Показываем форму для отзыва
+        user_states[call.from_user.id] = "awaiting_review_rating"
+        
+        markup = types.InlineKeyboardMarkup(row_width=5)
+        for i in range(1, 6):
+            markup.add(types.InlineKeyboardButton(
+                f"{'⭐️' * i}",
+                callback_data=f"review_rating_{i}"
+            ))
+        markup.add(types.InlineKeyboardButton("❌ Отмена", callback_data="reviews"))
+        
+        bot.edit_message_text(
+            "⭐️ *Оставить отзыв*\\n\\n"
+            "Сначала выберите оценку от 1 до 5 звёзд:",
+            call.message.chat.id,
+            call.message.message_id,
+            parse_mode="Markdown",
+            reply_markup=markup
+        )
+    
+    
     @bot.callback_query_handler(func=lambda call: call.data == "leave_review")
     def leave_review_callback(call):
         """Оставить отзыв"""

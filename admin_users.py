@@ -117,7 +117,7 @@ def register_admin_users_handlers(bot, user_states, user_data):
         elif list_type == "buyers":
             title = "🛍 Покупатели"
             where_clause = """
-                WHERE u.id IN (
+                WHERE u.user_id IN (
                     SELECT DISTINCT user_id FROM orders WHERE status = 'confirmed'
                 )
             """
@@ -226,9 +226,9 @@ def register_admin_users_handlers(bot, user_states, user_data):
         
         # Получаем данные пользователя
         cursor.execute("""
-            SELECT id, username, first_name, last_name, is_blocked, created_at
+            SELECT user_id, username, first_name, last_name, is_blocked, registration_date
             FROM users
-            WHERE id = ?
+            WHERE user_id = ?
         """, (user_id,))
         user = cursor.fetchone()
         
@@ -237,26 +237,21 @@ def register_admin_users_handlers(bot, user_states, user_data):
             conn.close()
             return
         
-        user_id, username, first_name, last_name, is_blocked, created_at = user
+        user_id, username, first_name, last_name, is_blocked, registration_date = user
         
         # Статистика заказов
         cursor.execute("""
             SELECT 
                 COUNT(*) as total,
-                SUM(CASE WHEN status = 'confirmed' THEN 1 ELSE 0 END) as confirmed,
-                SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
-                SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled,
-                SUM(CASE WHEN status = 'confirmed' THEN price ELSE 0 END) as total_spent
-            FROM orders
-            WHERE user_id = ?
+                SUM(CASE WHEN o.status = 'confirmed' THEN 1 ELSE 0 END) as confirmed,
+                SUM(CASE WHEN o.status = 'pending' THEN 1 ELSE 0 END) as pending,
+                SUM(CASE WHEN o.status = 'cancelled' THEN 1 ELSE 0 END) as cancelled,
+                SUM(CASE WHEN o.status = 'confirmed' THEN i.price_rub ELSE 0 END) as total_spent
+            FROM orders o
+            LEFT JOIN inventory i ON o.inventory_id = i.inventory_id
+            WHERE o.user_id = ?
         """, (user_id,))
         orders_stats = cursor.fetchone()
-        
-        # Статистика обращений
-        cursor.execute("""
-            SELECT COUNT(*) FROM tickets WHERE user_id = ?
-        """, (user_id,))
-        tickets_count = cursor.fetchone()[0]
         
         # Статистика отзывов
         cursor.execute("""
@@ -284,7 +279,7 @@ def register_admin_users_handlers(bot, user_states, user_data):
         text += f"Имя: {full_name}\n"
         text += f"Username: @{username or 'нет'}\n"
         text += f"Статус: {status_text}\n"
-        text += f"Регистрация: {datetime.fromisoformat(created_at).strftime('%d.%m.%Y %H:%M')}\n"
+        text += f"Регистрация: {datetime.fromisoformat(registration_date).strftime('%d.%m.%Y %H:%M')}\n"
         
         if last_order:
             text += f"Последний заказ: {datetime.fromisoformat(last_order[0]).strftime('%d.%m.%Y')}\n"
@@ -295,7 +290,6 @@ def register_admin_users_handlers(bot, user_states, user_data):
         text += f"  ⏳ В ожидании: {orders_stats[2]}\n"
         text += f"  ❌ Отменено: {orders_stats[3]}\n"
         text += f"• Потрачено: {orders_stats[4] or 0}₽\n"
-        text += f"• Обращений: {tickets_count}\n"
         text += f"• Отзывов: {reviews_count}\n"
         
         markup = types.InlineKeyboardMarkup(row_width=2)
@@ -341,7 +335,7 @@ def register_admin_users_handlers(bot, user_states, user_data):
         
         conn = sqlite3.connect(DATABASE)
         cursor = conn.cursor()
-        cursor.execute("UPDATE users SET is_blocked = 1 WHERE id = ?", (user_id,))
+        cursor.execute("UPDATE users SET is_blocked = 1 WHERE user_id = ?", (user_id,))
         conn.commit()
         conn.close()
         

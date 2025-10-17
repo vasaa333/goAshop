@@ -220,7 +220,7 @@ def register_user_handlers(bot, user_states, user_data):
     
     @bot.callback_query_handler(func=lambda call: call.data.startswith("buy_district_"))
     def buy_district_callback(call):
-        """Шаг 3: Выбор района - показать доступные товары"""
+        """Шаг 3: Выбор района - показать доступные товары с группировкой"""
         district_id = int(call.data.split("_")[-1])
         
         data = user_data.get(call.from_user.id, {})
@@ -247,11 +247,12 @@ def register_user_handlers(bot, user_states, user_data):
         
         district_name = district[0]
         
-        # Получаем доступные товары в этом районе
+        # Получаем доступные товары в этом районе С ГРУППИРОВКОЙ
         cursor.execute("""
-            SELECT id, weight_grams, price_rub
+            SELECT weight_grams, price_rub, GROUP_CONCAT(id) as ids, COUNT(*) as count
             FROM inventory
             WHERE product_id = ? AND city_id = ? AND district_id = ? AND status = 'available'
+            GROUP BY weight_grams, price_rub
             ORDER BY price_rub ASC
         """, (product_id, city_id, district_id))
         items = cursor.fetchall()
@@ -269,11 +270,19 @@ def register_user_handlers(bot, user_states, user_data):
         bot.answer_callback_query(call.id, f"Район: {district_name}")
         
         markup = types.InlineKeyboardMarkup(row_width=1)
-        for item_id, weight, price in items:
+        for weight, price, ids, count in items:
+            # Берем первый ID из группы для покупки
+            first_id = int(ids.split(',')[0])
+            
+            # Формируем текст кнопки с остатками
+            button_text = f"⚖️ {weight}г - 💰 {price}₽"
+            if count > 1:
+                button_text += f" (в наличии: {count} шт.)"
+            
             markup.add(
                 types.InlineKeyboardButton(
-                    f"⚖️ {weight}г - 💰 {price}₽",
-                    callback_data=f"buy_item_{item_id}"
+                    button_text,
+                    callback_data=f"buy_item_{first_id}"
                 )
             )
         markup.add(
@@ -526,9 +535,10 @@ def register_user_handlers(bot, user_states, user_data):
         user_states.pop(user_id, None)
         user_data.pop(user_id, None)
         
-        # Отправляем подтверждение пользователю
+        # Отправляем подтверждение пользователю с кнопкой отзыва
         markup = types.InlineKeyboardMarkup(row_width=1)
         markup.add(
+            types.InlineKeyboardButton("⭐️ Оставить отзыв", callback_data=f"write_review_{order_id}"),
             types.InlineKeyboardButton("📦 Мои заказы", callback_data="my_orders"),
             types.InlineKeyboardButton("🏠 В главное меню", callback_data="start")
         )
