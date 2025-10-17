@@ -248,7 +248,7 @@ def register_admin_users_handlers(bot, user_states, user_data):
                 SUM(CASE WHEN o.status = 'cancelled' THEN 1 ELSE 0 END) as cancelled,
                 SUM(CASE WHEN o.status = 'confirmed' THEN i.price_rub ELSE 0 END) as total_spent
             FROM orders o
-            LEFT JOIN inventory i ON o.inventory_id = i.inventory_id
+            LEFT JOIN inventory i ON o.inventory_id = i.id
             WHERE o.user_id = ?
         """, (user_id,))
         orders_stats = cursor.fetchone()

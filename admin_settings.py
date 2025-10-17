@@ -415,12 +415,12 @@ def register_admin_settings_handlers(bot, user_states, user_data):
         export_data["districts"] = [{"id": r[0], "city_id": r[1], "name": r[2]} for r in cursor.fetchall()]
         
         # Товары
-        cursor.execute("SELECT id, name, description FROM products")
-        export_data["products"] = [{"id": r[0], "name": r[1], "description": r[2]} for r in cursor.fetchall()]
+        cursor.execute("SELECT id, name FROM products")
+        export_data["products"] = [{"id": r[0], "name": r[1]} for r in cursor.fetchall()]
         
         # Наличие
-        cursor.execute("SELECT inventory_id, product_id, city_id, district_id, weight_grams, price_rub, is_active FROM inventory")
-        export_data["inventory"] = [{"id": r[0], "product_id": r[1], "city_id": r[2], "district_id": r[3], "weight": r[4], "price": r[5], "active": r[6]} for r in cursor.fetchall()]
+        cursor.execute("SELECT id, product_id, city_id, district_id, weight_grams, price_rub, status FROM inventory")
+        export_data["inventory"] = [{"id": r[0], "product_id": r[1], "city_id": r[2], "district_id": r[3], "weight": r[4], "price": r[5], "status": r[6]} for r in cursor.fetchall()]
         
         # Заказы
         cursor.execute("SELECT id, user_id, inventory_id, status, created_at FROM orders")
