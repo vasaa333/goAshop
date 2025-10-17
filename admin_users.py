@@ -117,7 +117,7 @@ def register_admin_users_handlers(bot, user_states, user_data):
         elif list_type == "buyers":
             title = "🛍 Покупатели"
             where_clause = """
-                WHERE u.id IN (
+                WHERE u.user_id IN (
                     SELECT DISTINCT user_id FROM orders WHERE status = 'confirmed'
                 )
             """
@@ -226,9 +226,9 @@ def register_admin_users_handlers(bot, user_states, user_data):
         
         # Получаем данные пользователя
         cursor.execute("""
-            SELECT id, username, first_name, last_name, is_blocked, created_at
+            SELECT user_id, username, first_name, last_name, is_blocked, registration_date
             FROM users
-            WHERE id = ?
+            WHERE user_id = ?
         """, (user_id,))
         user = cursor.fetchone()
         
@@ -237,7 +237,7 @@ def register_admin_users_handlers(bot, user_states, user_data):
             conn.close()
             return
         
-        user_id, username, first_name, last_name, is_blocked, created_at = user
+        user_id, username, first_name, last_name, is_blocked, registration_date = user
         
         # Статистика заказов
         cursor.execute("""
@@ -284,7 +284,7 @@ def register_admin_users_handlers(bot, user_states, user_data):
         text += f"Имя: {full_name}\n"
         text += f"Username: @{username or 'нет'}\n"
         text += f"Статус: {status_text}\n"
-        text += f"Регистрация: {datetime.fromisoformat(created_at).strftime('%d.%m.%Y %H:%M')}\n"
+        text += f"Регистрация: {datetime.fromisoformat(registration_date).strftime('%d.%m.%Y %H:%M')}\n"
         
         if last_order:
             text += f"Последний заказ: {datetime.fromisoformat(last_order[0]).strftime('%d.%m.%Y')}\n"
@@ -341,7 +341,7 @@ def register_admin_users_handlers(bot, user_states, user_data):
         
         conn = sqlite3.connect(DATABASE)
         cursor = conn.cursor()
-        cursor.execute("UPDATE users SET is_blocked = 1 WHERE id = ?", (user_id,))
+        cursor.execute("UPDATE users SET is_blocked = 1 WHERE user_id = ?", (user_id,))
         conn.commit()
         conn.close()
         
