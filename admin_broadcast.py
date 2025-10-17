@@ -359,7 +359,7 @@ def register_admin_broadcast_handlers(bot, user_states, user_data):
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT id, admin_id, message, status, total_users, sent_count, 
+            SELECT id, admin_id, message_text, status, total_users, sent_count, 
                    failed_count, created_at, completed_at
             FROM broadcasts
             WHERE id = ?
