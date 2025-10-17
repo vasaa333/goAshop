@@ -4,12 +4,14 @@
 """
 Telegram Shop Bot - Главный модуль
 Бот для продажи цифровых товаров с админ-панелью
+ФИНАЛЬНАЯ ВЕРСИЯ с КАПЧЕЙ и РЕЖИМОМ ТЕХ.РАБОТ
 """
 
 import os
 import sqlite3
 import base64
 import logging
+import random
 from dotenv import load_dotenv
 import telebot
 from telebot import types
@@ -39,6 +41,211 @@ bot = telebot.TeleBot(BOT_TOKEN)
 # Хранилище временных данных пользователей
 user_states = {}
 user_data = {}
+captcha_sessions = {}  # Хранилище активных капч
+
+
+def is_admin(user_id):
+    """Проверка прав администратора"""
+    return user_id == ADMIN_ID
+
+
+def get_bot_setting(key, default=''):
+    """Получить настройку из БД"""
+    try:
+        conn = sqlite3.connect(DATABASE)
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM bot_settings WHERE setting_key = ?", (key,))
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row else default
+    except:
+        return default
+
+
+# ============================================
+# MIDDLEWARE: РЕЖИМ ТЕХ.РАБОТ
+# ============================================
+@bot.middleware_handler(update_types=['message'])
+def maintenance_middleware(bot_instance, message):
+    """Middleware для блокировки пользователей при тех.работах"""
+    user_id = message.from_user.id
+    
+    # Админу всегда доступно
+    if is_admin(user_id):
+        return
+    
+    # Проверяем режим тех.работ
+    maintenance_mode = get_bot_setting('maintenance_mode', '0')
+    
+    if maintenance_mode == '1':
+        # Блокируем всех пользователей кроме админа
+        bot.send_message(
+            message.chat.id,
+            "🛠 *Проводятся технические работы*\n\n"
+            "Бот временно недоступен. Попробуйте позже.",
+            parse_mode="Markdown"
+        )
+        return  # Останавливаем обработку сообщения
+
+
+# ============================================
+# КАПЧА СИСТЕМА
+# ============================================
+def generate_captcha():
+    """Генерация математического вопроса для капчи"""
+    a = random.randint(1, 10)
+    b = random.randint(1, 10)
+    operation = random.choice(['+', '-'])
+    
+    if operation == '+':
+        correct_answer = a + b
+        question = f"{a} + {b}"
+    else:
+        # Для вычитания делаем так чтобы ответ был положительным
+        if a < b:
+            a, b = b, a
+        correct_answer = a - b
+        question = f"{a} - {b}"
+    
+    # Генерируем 3 неправильных ответа
+    wrong_answers = set()
+    while len(wrong_answers) < 3:
+        wrong = random.randint(max(0, correct_answer - 5), correct_answer + 5)
+        if wrong != correct_answer:
+            wrong_answers.add(wrong)
+    
+    # Перемешиваем ответы
+    all_answers = list(wrong_answers) + [correct_answer]
+    random.shuffle(all_answers)
+    
+    return question, correct_answer, all_answers
+
+
+def check_captcha_required(user_id):
+    """Проверка нужна ли капча пользователю"""
+    # Админу капча не нужна
+    if is_admin(user_id):
+        return False
+    
+    # Проверяем включена ли капча в настройках
+    captcha_enabled = get_bot_setting('captcha_enabled', '0')
+    if captcha_enabled != '1':
+        return False
+    
+    # Проверяем прошел ли пользователь капчу
+    try:
+        conn = sqlite3.connect(DATABASE)
+        cursor = conn.cursor()
+        cursor.execute("SELECT captcha_passed FROM users WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row and row[0] == 1:
+            return False  # Уже прошел
+        return True  # Нужно пройти
+    except:
+        return True
+
+
+def show_captcha(message):
+    """Показать капчу пользователю"""
+    user_id = message.from_user.id
+    
+    question, correct_answer, all_answers = generate_captcha()
+    captcha_sessions[user_id] = correct_answer
+    
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    buttons = [
+        types.InlineKeyboardButton(str(answer), callback_data=f"captcha_{answer}")
+        for answer in all_answers
+    ]
+    markup.add(*buttons)
+    
+    bot.send_message(
+        message.chat.id,
+        f"🤖 *Защита от ботов*\n\n"
+        f"Решите пример:\n"
+        f"`{question} = ?`\n\n"
+        f"Выберите правильный ответ:",
+        parse_mode="Markdown",
+        reply_markup=markup
+    )
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('captcha_'))
+def captcha_answer_callback(call):
+    """Обработка ответа на капчу"""
+    user_id = call.from_user.id
+    user_answer = int(call.data.replace('captcha_', ''))
+    
+    correct_answer = captcha_sessions.get(user_id)
+    
+    if correct_answer is None:
+        bot.answer_callback_query(call.id, "❌ Сессия капчи истекла. Попробуйте /start")
+        return
+    
+    if user_answer == correct_answer:
+        # Правильный ответ
+        bot.answer_callback_query(call.id, "✅ Правильно!")
+        
+        # Сохраняем что пользователь прошел капчу
+        try:
+            conn = sqlite3.connect(DATABASE)
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET captcha_passed = 1 WHERE user_id = ?", (user_id,))
+            conn.commit()
+            conn.close()
+        except:
+            pass
+        
+        # Удаляем сессию капчи
+        captcha_sessions.pop(user_id, None)
+        
+        # Показываем приветственное сообщение
+        welcome_message = get_bot_setting('welcome_message', 
+            f"👋 Добро пожаловать!\n\nВыберите действие ниже:")
+        
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            types.InlineKeyboardButton("🛍 Каталог", callback_data="catalog"),
+            types.InlineKeyboardButton("📦 Мои заказы", callback_data="my_orders")
+        )
+        markup.add(types.InlineKeyboardButton("⭐️ Отзывы", callback_data="reviews"))
+        markup.add(types.InlineKeyboardButton("ℹ️ Информация", callback_data="info"))
+        
+        bot.edit_message_text(
+            welcome_message,
+            call.message.chat.id,
+            call.message.message_id,
+            parse_mode="Markdown",
+            reply_markup=markup
+        )
+    else:
+        # Неправильный ответ
+        bot.answer_callback_query(call.id, "❌ Неправильно! Попробуйте еще раз.")
+        
+        # Генерируем новую капчу
+        question, correct_answer, all_answers = generate_captcha()
+        captcha_sessions[user_id] = correct_answer
+        
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        buttons = [
+            types.InlineKeyboardButton(str(answer), callback_data=f"captcha_{answer}")
+            for answer in all_answers
+        ]
+        markup.add(*buttons)
+        
+        bot.edit_message_text(
+            f"🤖 *Защита от ботов*\n\n"
+            f"❌ Неправильно! Попробуйте еще раз:\n\n"
+            f"Решите пример:\n"
+            f"`{question} = ?`\n\n"
+            f"Выберите правильный ответ:",
+            call.message.chat.id,
+            call.message.message_id,
+            parse_mode="Markdown",
+            reply_markup=markup
+        )
 
 
 def init_database():
@@ -135,11 +342,6 @@ def decrypt_data(encrypted_data: str) -> str:
     return base64.b64decode(encrypted_data.encode('utf-8')).decode('utf-8')
 
 
-def is_admin(user_id: int) -> bool:
-    """Проверка, является ли пользователь администратором"""
-    return user_id == ADMIN_ID
-
-
 # Импорт обработчиков
 from admin_panel import register_admin_handlers
 from admin_orders import register_orders_handlers
@@ -148,7 +350,7 @@ from user_menu import register_user_menu_handlers
 from admin_users import register_admin_users_handlers
 from admin_broadcast import register_admin_broadcast_handlers
 from admin_settings import register_admin_settings_handlers
-from admin_logs import register_admin_logs_handlers
+from admin_logs_final import register_admin_logs_handlers
 import db_migration
 
 # Регистрация обработчиков
@@ -184,6 +386,12 @@ def start_command(message):
     except:
         pass  # Таблица users может не существовать в старых БД
     
+    # Проверяем нужна ли капча (только для обычных пользователей)
+    if not is_admin(user_id) and check_captcha_required(user_id):
+        show_captcha(message)
+        return
+    
+    # Если капча не нужна или админ - показываем главное меню
     markup = types.InlineKeyboardMarkup(row_width=2)
     
     if is_admin(user_id):
@@ -199,6 +407,10 @@ def start_command(message):
             reply_markup=markup
         )
     else:
+        # Используем приветственное сообщение из настроек
+        welcome_message = get_bot_setting('welcome_message', 
+            f"👋 Добро пожаловать, <b>{first_name}</b>!\n\nЯ бот для покупки товаров.\nВыберите действие:")
+        
         markup.add(
             types.InlineKeyboardButton("🛍 Каталог", callback_data="catalog"),
             types.InlineKeyboardButton("📦 Мои заказы", callback_data="my_orders")
@@ -211,9 +423,7 @@ def start_command(message):
         )
         bot.send_message(
             message.chat.id,
-            f"👋 Добро пожаловать, <b>{first_name}</b>!\n\n"
-            f"Я бот для покупки товаров.\n"
-            f"Выберите действие:",
+            welcome_message,
             parse_mode='HTML',
             reply_markup=markup
         )
