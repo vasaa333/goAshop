@@ -254,71 +254,9 @@ def migrate_database():
     
     print("✅ Индексы созданы")
     
-    # ========== ТЕСТОВЫЕ ДАННЫЕ ==========
-    print("\n📦 Добавление тестовых данных...")
-    
-    # Проверяем, есть ли уже данные
-    cursor.execute("SELECT COUNT(*) FROM cities")
-    cities_count = cursor.fetchone()[0]
-    
-    if cities_count == 0:
-        # Добавляем тестовый город
-        cursor.execute("""
-            INSERT INTO cities (name) VALUES ('Москва')
-        """)
-        city_id = cursor.lastrowid
-        
-        # Добавляем тестовые районы
-        districts = ['Центральный', 'Северный', 'Южный', 'Восточный', 'Западный']
-        for district in districts:
-            cursor.execute("""
-                INSERT INTO districts (name, city_id) VALUES (?, ?)
-            """, (district, city_id))
-        
-        # Добавляем тестовый товар
-        cursor.execute("""
-            INSERT INTO products (name) VALUES ('Тестовый товар')
-        """)
-        product_id = cursor.lastrowid
-        
-        # Добавляем тестовый инвентарь для каждого района
-        cursor.execute("SELECT id FROM districts WHERE city_id = ?", (city_id,))
-        districts_ids = cursor.fetchall()
-        
-        weights = [0.5, 1.0, 2.0, 5.0]
-        for district_id, in districts_ids[:2]:  # Первые 2 района
-            for weight in weights:
-                cursor.execute("""
-                    INSERT INTO inventory 
-                    (product_id, city_id, district_id, weight_grams, price_rub, status, data_encrypted)
-                    VALUES (?, ?, ?, ?, ?, 'available', ?)
-                """, (
-                    product_id,
-                    city_id,
-                    district_id,
-                    int(weight * 1000),  # Конвертируем в граммы
-                    int(weight * 1000),  # Цена = вес * 1000 (пример)
-                    'VGVzdG92eWUgZGFubnll'  # Base64: "Testovye dannye"
-                ))
-        
-        # Добавляем запись в bot_settings
-        cursor.execute("""
-            INSERT OR IGNORE INTO bot_settings 
-            (id, captcha_enabled, maintenance_mode, welcome_text, payment_instructions, support_username)
-            VALUES (1, 0, 0, 
-                'Добро пожаловать в магазин! Выберите нужный товар из каталога.',
-                'Переведите указанную сумму на карту: 1234 5678 9012 3456',
-                'support')
-        """)
-        
-        conn.commit()
-        print("✅ Тестовые данные добавлены:")
-        print("   • Город: Москва")
-        print("   • Районы: 5 районов")
-        print("   • Товар: Тестовый товар")
-        print("   • Позиции в наличии: 8 позиций (2 района × 4 веса)")
-    else:
-        print("ℹ️  Тестовые данные уже существуют, пропускаем")
+    # Сохраняем изменения
+    conn.commit()
+    conn.close()
     
     print("\n✅ Миграция базы данных завершена успешно!")
     print("📊 База данных готова к работе с новым функционалом\n")
